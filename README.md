@@ -71,11 +71,23 @@ original, the port only copied it.
   1 open now (peak 3), 0 refused, 0 thread failures`. Every connection has a thread: "open now" must stay low, if it
   climbs the threads are not given back. A failed `pthread_create` and a refused connection are logged at once.
 
+### Building on Windows with the current toolchain
+
+`python tools/build.py --toolchain <OpenOrbis toolchain folder>` runs the steps of `RPI/build.bat` and puts everything in
+`build/` (the package is `build/IV0000-KPBR01111_00-AAAAAAAAAAAAAAAA.pkg`). Tested with the OpenOrbis toolchain v0.5.4 and
+the clang 19 / lld that come with Visual Studio 2022. Differences to `build.bat`:
+
+- clang 16+ turns the use of an undeclared function into an error, the 2022 sources have a few (`strcpy` without
+  `string.h`, ...). They stay warnings (`-Wno-error=implicit-function-declaration` and two similar flags).
+- The headers of the newer toolchain do not include `stdint.h` themselves, so it is force-included.
+- `-lSceJson` does not exist in the newer toolchain and nothing uses it (RPI has `tiny-json`), the build skips a library
+  that is missing.
+- `PkgTool.Core` is a .NET Core 3.0 program, `DOTNET_ROLL_FORWARD=Major` lets it run on a newer .NET (for that process only).
+
 ### Status
 
 Reviewed and the changed `sandbird.c` passes a syntax/type check with clang (`tools\check-syntax.ps1`, stand-in
-headers, no new warnings). **Not built with the OpenOrbis toolchain and not run on a console yet.** The timeout calls
-in `http.c` and `clock_gettime` / `sceKernelUsleep` in `server.c` use functions that were not checked against the
-real headers, if the build complains that is where to look. The default port is still 12801, so it can be installed
+headers, no new warnings). **Builds with the OpenOrbis toolchain (see above), not run on a console yet.** The functions
+added by the changes (`pthread_attr_*`, `clock_gettime`, `sceKernelUsleep`, the sceHttp timeouts) are declared in the real
+headers and the program links. The default port is still 12801, so it can be installed
 next to flatz's RPI (title id FLTZ00003), only one of them can run at a time.
-

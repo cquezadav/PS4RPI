@@ -656,7 +656,23 @@ err:
 }
 
 bool bgft_download_get_task_progress(int task_id, struct bgft_download_task_progress_info* progress_info, int* error) {
-	OrbisBgftTaskProgress tmp_progress_info;
+	/* The OpenOrbis header declares this struct with 32-bit sizes (0x30 bytes), the system writes 0x40 bytes with 64-bit sizes
+	 * (as in flatz's original). With the header's type the call overwrote the stack: crash in memset(progress_info) = SIGSEGV. */
+	struct {
+		uint32_t bits;
+		int32_t errorResult;
+		uint64_t length;
+		uint64_t transferred;
+		uint64_t lengthTotal;
+		uint64_t transferredTotal;
+		uint32_t numIndex;
+		uint32_t numTotal;
+		uint32_t restSec;
+		uint32_t restSecTotal;
+		int32_t preparingPercent;
+		int32_t localCopyPercent;
+		char reserve[64];   /* spare room in case a firmware writes more */
+	} tmp_progress_info;
 	int ret;
 
 	if (!s_bgft_initialized) {
@@ -683,7 +699,7 @@ bool bgft_download_get_task_progress(int task_id, struct bgft_download_task_prog
 	}
 
 	memset(&tmp_progress_info, 0, sizeof(tmp_progress_info));
-	ret = sceBgftServiceDownloadGetProgress((OrbisBgftTaskId)task_id, &tmp_progress_info);
+	ret = sceBgftServiceDownloadGetProgress((OrbisBgftTaskId)task_id, (OrbisBgftTaskProgress*)&tmp_progress_info);
 	if (ret) {
 		if (error) {
 			*error = ret;

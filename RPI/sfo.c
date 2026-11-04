@@ -75,6 +75,7 @@ bool sfo_load_from_file(struct sfo* sfo, const char* file_path) {
 	struct stat stats;
 	uint8_t* data = NULL;
 	size_t data_size;
+	uint64_t file_size;
 	ssize_t nread;
 	int fd = -1;
 	bool status = false;
@@ -89,12 +90,20 @@ bool sfo_load_from_file(struct sfo* sfo, const char* file_path) {
 		goto err;
 	}
 
-	ret = fstat(fd, &stats);
-	if (ret < 0) {
-		EPRINTF("Unable to get file information.\n");
+	/* Not stats.st_size: the struct stat of the newer toolchain does not match the console, the size was garbage and a
+	 * good param.sfo was rejected as "Insufficient data". */
+	if (!get_fd_size(fd, &file_size)) {
+		EPRINTF("Unable to get file size.\n");
 		goto err;
 	}
-	data_size = (size_t)stats.st_size;
+	data_size = (size_t)file_size;
+
+	/* only for the log: how far off fstat is */
+	ret = fstat(fd, &stats);
+	if (ret == 0 && (uint64_t)stats.st_size != file_size) {
+		EPRINTF("fstat says %llu bytes for '%s', the file has %llu (struct stat does not match the console)\n",
+			(unsigned long long)stats.st_size, file_path, (unsigned long long)file_size);
+	}
 
 	data = (uint8_t*)malloc(data_size);
 	if (!data) {
@@ -113,7 +122,7 @@ bool sfo_load_from_file(struct sfo* sfo, const char* file_path) {
 	}
 
 	if (!sfo_load_from_memory(sfo, data, data_size)) {
-		EPRINTF("Unable to load system file object.\n");
+		EPRINTF("Unable to load system file object from '%s' (%llu bytes).\n", file_path, (unsigned long long)data_size);
 		goto err;
 	}
 

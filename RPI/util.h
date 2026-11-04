@@ -10,6 +10,10 @@ bool read_file(const char* path, void** data, uint64_t* size, uint64_t max_size,
 bool write_file(const char* path, const void* data, uint64_t size, uint64_t* nwritten, int mode, unsigned int flags);
 bool write_file_trunc(const char* path, const void* data, uint64_t size, uint64_t* nwritten, int mode);
 
+/* Size of an open file. fstat() is not used for it: the struct stat of the newer toolchain does not match what the
+ * console fills in, st_size was read as garbage. */
+bool get_fd_size(int fd, uint64_t* size);
+
 bool is_file_exists(const char* path);
 
 void hexdump(const void* data, size_t size);

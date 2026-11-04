@@ -59,9 +59,24 @@ err:
 	return ret;
 }
 
+bool get_fd_size(int fd, uint64_t* size) {
+	off_t cur, end;
+
+	cur = lseek(fd, 0, SEEK_CUR);
+	if (cur < 0)
+		return false;
+	end = lseek(fd, 0, SEEK_END);
+	if (end < 0)
+		return false;
+	if (lseek(fd, cur, SEEK_SET) < 0)
+		return false;
+
+	*size = (uint64_t)end;
+	return true;
+}
+
 bool read_file(const char* path, void** data, uint64_t* size, uint64_t max_size, uint64_t* nread) {
 	int fd = -1;
-	struct stat info;
 	uint64_t file_size, user_size;
 	uint64_t size_left, total = 0;
 	uint8_t* buf = NULL;
@@ -79,10 +94,8 @@ bool read_file(const char* path, void** data, uint64_t* size, uint64_t max_size,
 	if (ret < 0)
 		goto err;
 
-	ret = fstat(fd, &info);
-	if (ret < 0)
+	if (!get_fd_size(fd, &file_size))
 		goto err;
-	file_size = (uint64_t)info.st_size;
 
 	/* User may provide his own buffer. */
 	buf = (uint8_t*)*data;
@@ -171,15 +184,18 @@ bool write_file(const char* path, const void* data, uint64_t size, uint64_t* nwr
 		buf = (const uint8_t*)data;
 		for (size_left = size; size_left > 0;) {
 			n = write(fd, buf, (size_t)size_left);
-			if (n <= 0)
-				break; /* status is okay but we need to check num written parameter */
+			if (n <= 0) {
+				EPRINTF("write to '%s' failed: returned %d, errno %d, %llu of %llu bytes written\n", path, (int)n, errno, (unsigned long long)total, (unsigned long long)size);
+				break;
+			}
 			size_left -= n;
 			total += n;
 			buf += n;
 		}
 	}
 
-	status = true;
+	/* it was "true" whatever was written, the callers do not look at nwritten and went on with an empty file */
+	status = (total == size);
 
 err:
 	if (fd > 0)

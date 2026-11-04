@@ -75,7 +75,7 @@ err:
 }
 
 char** pkg_extract_piece_urls_from_ref_pkg_json(const char* url, size_t* piece_count) {
-	static json_t* pool = NULL;
+	json_t* pool = NULL;
 	const size_t pool_size = 256;
 	const json_t* root;
 	const json_t* field;
@@ -195,6 +195,10 @@ char** pkg_extract_piece_urls_from_ref_pkg_json(const char* url, size_t* piece_c
 		free(data);
 	}
 
+	if (pool) {
+		free(pool);
+	}
+
 	return piece_urls;
 
 err:
@@ -215,6 +219,10 @@ err:
 
 	if (data) {
 		free(data);
+	}
+
+	if (pool) {
+		free(pool);
 	}
 
 	return NULL;

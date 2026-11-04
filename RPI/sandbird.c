@@ -23,6 +23,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/types.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 #include "sandbird.h"
@@ -30,6 +31,16 @@
 #include <orbis/Net.h>
 
 typedef int sb_Socket;
+
+/* Never more than this many connections at the same time, each one runs in its own thread */
+#define SB_MAX_STREAMS 24
+
+/* A write to a client that is gone must not kill the whole process (SIGPIPE) */
+#ifdef MSG_NOSIGNAL
+#define SB_SEND_FLAGS MSG_NOSIGNAL
+#else
+#define SB_SEND_FLAGS 0
+#endif
 #define INVALID_SOCKET -1
 
 enum {
@@ -63,6 +74,33 @@ static int set_socket_blocking(sb_Socket sockfd, bool flag) {
     return SB_EFAILURE;
   }
   return SB_ESUCCESS;
+}
+
+
+/* A client that connects and then says nothing, or stops reading, must not hold its thread forever. */
+static void set_socket_options(sb_Socket sockfd, time_t timeout) {
+  struct timeval tv, check;
+  socklen_t len = sizeof(check);
+#ifdef SO_NOSIGPIPE
+  int one = 1;
+  setsockopt(sockfd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
+#endif
+  if (timeout <= 0) return;
+
+  tv.tv_sec = timeout;
+  tv.tv_usec = 0;
+  if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) == 0 &&
+      setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) == 0) {
+    /* Read it back. If the console understood something else than a struct timeval the connection
+     * would time out after microseconds, in that case the timeouts are switched off again. */
+    memset(&check, 0, sizeof(check));
+    if (getsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &check, &len) != 0 || check.tv_sec != tv.tv_sec) {
+      tv.tv_sec = 0;
+      tv.tv_usec = 0;
+      setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+      setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    }
+  }
 }
 
 
@@ -362,6 +400,7 @@ static sb_Stream *sb_stream_new(sb_Server *srv, sb_Socket sockfd) {
   st->init_time = time(NULL);
   st->last_activity = srv->now;
   set_socket_blocking(sockfd, true);
+  set_socket_options(sockfd, srv->timeout);
   get_socket_address(sockfd, st->address);
   return st;
 }
@@ -404,6 +443,7 @@ static void sb_stream_link(sb_Stream *st) {
   } else {
     srv->streams = st;
   }
+  srv->stream_count++;
   pthread_mutex_unlock(&srv->stream_mtx);
 }
 
@@ -422,6 +462,7 @@ static void sb_stream_unlink(sb_Stream *st) {
   if (srv->streams == st) {
     srv->streams = st->next;
   }
+  if (srv->stream_count > 0) srv->stream_count--;
   pthread_mutex_unlock(&srv->stream_mtx);
 }
 
@@ -455,6 +496,7 @@ static int sb_stream_recv(sb_Stream *st) {
 
     /* Receive data */
     sz = recv(st->sockfd, buf, sizeof(buf) - 1, 0);
+    if (sz < 0 && errno == EINTR) continue;    /* interrupted by a signal, try again */
     if (sz <= 0) {
       /* Disconnected? */
       if (sz == 0 || errno != EWOULDBLOCK) {
@@ -465,6 +507,12 @@ static int sb_stream_recv(sb_Stream *st) {
 
     /* Update last_activity */
     st->last_activity = st->server->now;
+
+    /* Requests are small, a client that keeps sending must not fill the memory */
+    if (st->server->max_request_size > 0 && st->recv_buf.len + (size_t)sz > st->server->max_request_size) {
+      sb_stream_close(st);
+      return SB_ESUCCESS;
+    }
 
     /* Write to recv_buf */
     for (i = 0; i < sz; i++) {
@@ -541,12 +589,13 @@ static int sb_stream_send(sb_Stream *st) {
 
     /* Send data */
 send_data:
-    sz = send(st->sockfd, st->send_buf.s, st->send_buf.len, 0);
+    sz = send(st->sockfd, st->send_buf.s, st->send_buf.len, SB_SEND_FLAGS);
     if (sz <= 0) {
-      /* Disconnected? */
-      if (errno != EWOULDBLOCK) {
-        sb_stream_close(st);
+      /* Interrupted: try again. Anything else (the client is gone, the send timeout ran out) ends the stream. */
+      if (sz < 0 && errno == EINTR) {
+        return SB_ESUCCESS;
       }
+      sb_stream_close(st);
       return SB_ESUCCESS;
     }
 
@@ -859,9 +908,10 @@ sb_Server *sb_new_server(const sb_Options *opt) {
   srv->sockfd = INVALID_SOCKET;
   srv->handler = opt->handler;
   srv->udata = opt->udata;
-  srv->timeout = opt->timeout ? str_to_uint(opt->timeout) : 30000;
+  srv->timeout = opt->timeout ? str_to_uint(opt->timeout) : 30;    /* seconds */
   srv->max_request_size = str_to_uint(opt->max_request_size);
   srv->max_lifetime = str_to_uint(opt->max_lifetime);
+  srv->max_streams = SB_MAX_STREAMS;
 
   memset(&in_addr, 0, sizeof(in_addr));
   in_addr.sin_family = AF_INET;
@@ -937,8 +987,9 @@ void sb_close_server(sb_Server *srv) {
   pthread_mutex_lock(&srv->stream_mtx);
   st = srv->streams;
   while (st) {
-    st = st->next;
+    sb_Stream *next = st->next;
     sb_stream_destroy(st);
+    st = next;
   }
   srv->streams = NULL;
   pthread_mutex_unlock(&srv->stream_mtx);
@@ -987,9 +1038,11 @@ fail:
 
 
 int sb_poll_server(sb_Server *srv) {
-  struct sb_Stream *st;
+  struct sb_Stream *st = NULL;
   sb_Socket sockfd = INVALID_SOCKET;
   pthread_t thr;
+  pthread_attr_t attr;
+  int count;
   int err;
 
   /* Get and store current time */
@@ -997,6 +1050,19 @@ int sb_poll_server(sb_Server *srv) {
 
   /* Accept connections */
   while ( (sockfd = accept(srv->sockfd, NULL, NULL)) != INVALID_SOCKET ) {
+    /* Every connection gets a thread. Too many at the same time means something is wrong
+     * (a client that does not answer, a flood): refuse the new one instead of running out of threads */
+    pthread_mutex_lock(&srv->stream_mtx);
+    count = srv->stream_count;
+    pthread_mutex_unlock(&srv->stream_mtx);
+    if (srv->max_streams > 0 && count >= srv->max_streams) {
+      KernelPrintOut("[RPI] too many open connections (%d), one was refused\n", count);
+      shutdown(sockfd, SHUT_RDWR);
+      close(sockfd);
+      sockfd = INVALID_SOCKET;
+      continue;
+    }
+
     /* Init new stream */
     st = sb_stream_new(srv, sockfd);
     if (!st) {
@@ -1007,10 +1073,21 @@ int sb_poll_server(sb_Server *srv) {
     /* Link stream to list */
     sb_stream_link(st);
 
-    /* Create processing thread */
-    err = pthread_create(&thr, NULL, &conn_thread, st);
+    /* Create processing thread. It is DETACHED: a thread that is never joined keeps its resources after it ended.
+     * With a new thread for every request the console ran out of thread memory after some hundred requests
+     * ("Internal Memory for Pthread is running out"), RPI accepted connections and closed them at once. */
+    err = pthread_attr_init(&attr);
+    if (!err) {
+      pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+      err = pthread_create(&thr, &attr, &conn_thread, st);
+      pthread_attr_destroy(&attr);
+    } else {
+      err = pthread_create(&thr, NULL, &conn_thread, st);
+      if (!err) pthread_detach(thr);
+    }
     if (err) goto fail;
 
+    st = NULL;
     sockfd = INVALID_SOCKET;
   }
 
@@ -1018,8 +1095,10 @@ int sb_poll_server(sb_Server *srv) {
 
 fail:
   if (st) {
-    /* Unlinking stream from list */
+    /* No thread owns the stream, free it here (this also closes its socket) */
     sb_stream_unlink(st);
+    sb_stream_destroy(st);
+    sockfd = INVALID_SOCKET;
   }
 
   if (sockfd != INVALID_SOCKET) {

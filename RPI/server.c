@@ -134,9 +134,9 @@ bool server_start(const char* ip_address, int port, const char* work_dir) {
 
 		opts.port = port_str;
 		opts.handler = &event_handler;
-		opts.timeout = "0";
+		opts.timeout = "30";    /* seconds without data from a client */
 		opts.max_lifetime = "0";
-		opts.max_request_size = "0";
+		opts.max_request_size = "1048576";    /* 1 MB, requests are small JSON */
 	}
 
 	s_server = sb_new_server(&opts);
@@ -169,6 +169,8 @@ bool server_listen(void) {
 
 	for (;;) {
 		sb_poll_server(s_server);
+		/* the listening socket does not block, without a pause RPI keeps one CPU core busy */
+		sceKernelUsleep(5 * 1000);
 	}
 
 	return true;
@@ -266,7 +268,15 @@ bad_request:
     data = sb_get_query_data(st, "data");
   }
 
-	(*handler)(st, method, path, data, sizeof(data));
+	struct timespec t_start, t_end;
+	bool handled;
+
+	clock_gettime(CLOCK_MONOTONIC, &t_start);
+	handled = (*handler)(st, method, path, data, data ? strlen(data) : 0);
+	clock_gettime(CLOCK_MONOTONIC, &t_end);
+
+	printf("[RPI] %s %s %s in %ld ms, %d connections open\n", method, path, handled ? "ok" : "failed",
+		(long)((t_end.tv_sec - t_start.tv_sec) * 1000 + (t_end.tv_nsec - t_start.tv_nsec) / 1000000), e->server->stream_count);
 
 	ret = SB_RES_OK;
 
@@ -673,17 +683,20 @@ err:
 }
 
 static bool handle_api_install(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size) {
-	static json_t* pool = NULL;
+	json_t* pool = NULL;
 	const size_t pool_size = 256;
 	const json_t* root;
 	const json_t* field;
 	union json_value_t val;
 	bool status;
 
-	assert(s != NULL);
-	assert(method != NULL);
-	assert(path != NULL);
-	assert(in_data != NULL);
+	if (!s || !method || !path) {
+		return false;
+	}
+	if (!in_data) {
+		kick_error(s, 400, "Bad request", "No data specified.");
+		return false;
+	}
 
 	pool = (json_t*)malloc(sizeof(*pool) * pool_size);
 	if (!pool) {
@@ -727,7 +740,7 @@ err:
 }
 
 static bool handle_api_uninstall_game(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size) {
-	static json_t* pool = NULL;
+	json_t* pool = NULL;
 	const size_t pool_size = 256;
 	const json_t* root;
 	const json_t* field;
@@ -735,10 +748,13 @@ static bool handle_api_uninstall_game(sb_Stream* s, const char* method, const ch
 	union json_value_t val;
 	int ret;
 
-	assert(s != NULL);
-	assert(method != NULL);
-	assert(path != NULL);
-	assert(in_data != NULL);
+	if (!s || !method || !path) {
+		return false;
+	}
+	if (!in_data) {
+		kick_error(s, 400, "Bad request", "No data specified.");
+		return false;
+	}
 
 	pool = (json_t*)malloc(sizeof(*pool) * pool_size);
 	if (!pool) {
@@ -784,7 +800,7 @@ err:
 }
 
 static bool handle_api_uninstall_ac(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size) {
-	static json_t* pool = NULL;
+	json_t* pool = NULL;
 	const size_t pool_size = 256;
 	const json_t* root;
 	const json_t* field;
@@ -792,10 +808,13 @@ static bool handle_api_uninstall_ac(sb_Stream* s, const char* method, const char
 	union json_value_t val;
 	int ret;
 
-	assert(s != NULL);
-	assert(method != NULL);
-	assert(path != NULL);
-	assert(in_data != NULL);
+	if (!s || !method || !path) {
+		return false;
+	}
+	if (!in_data) {
+		kick_error(s, 400, "Bad request", "No data specified.");
+		return false;
+	}
 
 	pool = (json_t*)malloc(sizeof(*pool) * pool_size);
 	if (!pool) {
@@ -841,7 +860,7 @@ err:
 }
 
 static bool handle_api_uninstall_patch(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size) {
-	static json_t* pool = NULL;
+	json_t* pool = NULL;
 	const size_t pool_size = 256;
 	const json_t* root;
 	const json_t* field;
@@ -849,10 +868,13 @@ static bool handle_api_uninstall_patch(sb_Stream* s, const char* method, const c
 	union json_value_t val;
 	int ret;
 
-	assert(s != NULL);
-	assert(method != NULL);
-	assert(path != NULL);
-	assert(in_data != NULL);
+	if (!s || !method || !path) {
+		return false;
+	}
+	if (!in_data) {
+		kick_error(s, 400, "Bad request", "No data specified.");
+		return false;
+	}
 
 	pool = (json_t*)malloc(sizeof(*pool) * pool_size);
 	if (!pool) {
@@ -898,7 +920,7 @@ err:
 }
 
 static bool handle_api_uninstall_theme(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size) {
-	static json_t* pool = NULL;
+	json_t* pool = NULL;
 	const size_t pool_size = 256;
 	const json_t* root;
 	const json_t* field;
@@ -906,10 +928,13 @@ static bool handle_api_uninstall_theme(sb_Stream* s, const char* method, const c
 	union json_value_t val;
 	int ret;
 
-	assert(s != NULL);
-	assert(method != NULL);
-	assert(path != NULL);
-	assert(in_data != NULL);
+	if (!s || !method || !path) {
+		return false;
+	}
+	if (!in_data) {
+		kick_error(s, 400, "Bad request", "No data specified.");
+		return false;
+	}
 
 	pool = (json_t*)malloc(sizeof(*pool) * pool_size);
 	if (!pool) {
@@ -955,7 +980,7 @@ err:
 }
 
 static bool handle_api_is_exists(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size) {
-	static json_t* pool = NULL;
+	json_t* pool = NULL;
 	const size_t pool_size = 256;
 	const json_t* root;
 	const json_t* field;
@@ -965,10 +990,13 @@ static bool handle_api_is_exists(sb_Stream* s, const char* method, const char* p
 	bool exists;
 	int ret;
 
-	assert(s != NULL);
-	assert(method != NULL);
-	assert(path != NULL);
-	assert(in_data != NULL);
+	if (!s || !method || !path) {
+		return false;
+	}
+	if (!in_data) {
+		kick_error(s, 400, "Bad request", "No data specified.");
+		return false;
+	}
 
 	pool = (json_t*)malloc(sizeof(*pool) * pool_size);
 	if (!pool) {
@@ -1021,7 +1049,7 @@ err:
 }
 
 static bool handle_api_start_task(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size) {
-	static json_t* pool = NULL;
+	json_t* pool = NULL;
 	const size_t pool_size = 256;
 	const json_t* root;
 	const json_t* field;
@@ -1029,10 +1057,13 @@ static bool handle_api_start_task(sb_Stream* s, const char* method, const char* 
 	union json_value_t val;
 	int ret;
 
-	assert(s != NULL);
-	assert(method != NULL);
-	assert(path != NULL);
-	assert(in_data != NULL);
+	if (!s || !method || !path) {
+		return false;
+	}
+	if (!in_data) {
+		kick_error(s, 400, "Bad request", "No data specified.");
+		return false;
+	}
 
 	pool = (json_t*)malloc(sizeof(*pool) * pool_size);
 	if (!pool) {
@@ -1081,7 +1112,7 @@ err:
 }
 
 static bool handle_api_stop_task(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size) {
-	static json_t* pool = NULL;
+	json_t* pool = NULL;
 	const size_t pool_size = 256;
 	const json_t* root;
 	const json_t* field;
@@ -1089,10 +1120,13 @@ static bool handle_api_stop_task(sb_Stream* s, const char* method, const char* p
 	union json_value_t val;
 	int ret;
 
-	assert(s != NULL);
-	assert(method != NULL);
-	assert(path != NULL);
-	assert(in_data != NULL);
+	if (!s || !method || !path) {
+		return false;
+	}
+	if (!in_data) {
+		kick_error(s, 400, "Bad request", "No data specified.");
+		return false;
+	}
 
 	pool = (json_t*)malloc(sizeof(*pool) * pool_size);
 	if (!pool) {
@@ -1141,7 +1175,7 @@ err:
 }
 
 static bool handle_api_pause_task(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size) {
-	static json_t* pool = NULL;
+	json_t* pool = NULL;
 	const size_t pool_size = 256;
 	const json_t* root;
 	const json_t* field;
@@ -1149,10 +1183,13 @@ static bool handle_api_pause_task(sb_Stream* s, const char* method, const char* 
 	union json_value_t val;
 	int ret;
 
-	assert(s != NULL);
-	assert(method != NULL);
-	assert(path != NULL);
-	assert(in_data != NULL);
+	if (!s || !method || !path) {
+		return false;
+	}
+	if (!in_data) {
+		kick_error(s, 400, "Bad request", "No data specified.");
+		return false;
+	}
 
 	pool = (json_t*)malloc(sizeof(*pool) * pool_size);
 	if (!pool) {
@@ -1201,7 +1238,7 @@ err:
 }
 
 static bool handle_api_resume_task(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size) {
-	static json_t* pool = NULL;
+	json_t* pool = NULL;
 	const size_t pool_size = 256;
 	const json_t* root;
 	const json_t* field;
@@ -1209,10 +1246,13 @@ static bool handle_api_resume_task(sb_Stream* s, const char* method, const char*
 	union json_value_t val;
 	int ret;
 
-	assert(s != NULL);
-	assert(method != NULL);
-	assert(path != NULL);
-	assert(in_data != NULL);
+	if (!s || !method || !path) {
+		return false;
+	}
+	if (!in_data) {
+		kick_error(s, 400, "Bad request", "No data specified.");
+		return false;
+	}
 
 	pool = (json_t*)malloc(sizeof(*pool) * pool_size);
 	if (!pool) {
@@ -1261,7 +1301,7 @@ err:
 }
 
 static bool handle_api_unregister_task(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size) {
-	static json_t* pool = NULL;
+	json_t* pool = NULL;
 	const size_t pool_size = 256;
 	const json_t* root;
 	const json_t* field;
@@ -1269,10 +1309,13 @@ static bool handle_api_unregister_task(sb_Stream* s, const char* method, const c
 	union json_value_t val;
 	int ret;
 
-	assert(s != NULL);
-	assert(method != NULL);
-	assert(path != NULL);
-	assert(in_data != NULL);
+	if (!s || !method || !path) {
+		return false;
+	}
+	if (!in_data) {
+		kick_error(s, 400, "Bad request", "No data specified.");
+		return false;
+	}
 
 	pool = (json_t*)malloc(sizeof(*pool) * pool_size);
 	if (!pool) {
@@ -1321,7 +1364,7 @@ err:
 }
 
 static bool handle_api_get_task_progress(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size) {
-	static json_t* pool = NULL;
+	json_t* pool = NULL;
 	const size_t pool_size = 256;
 	const json_t* root;
 	const json_t* field;
@@ -1330,10 +1373,13 @@ static bool handle_api_get_task_progress(sb_Stream* s, const char* method, const
 	union json_value_t val;
 	int ret;
 
-	assert(s != NULL);
-	assert(method != NULL);
-	assert(path != NULL);
-	assert(in_data != NULL);
+	if (!s || !method || !path) {
+		return false;
+	}
+	if (!in_data) {
+		kick_error(s, 400, "Bad request", "No data specified.");
+		return false;
+	}
 
 	pool = (json_t*)malloc(sizeof(*pool) * pool_size);
 	if (!pool) {
@@ -1387,7 +1433,7 @@ err:
 }
 
 static bool handle_api_find_task(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size) {
-	static json_t* pool = NULL;
+	json_t* pool = NULL;
 	const size_t pool_size = 256;
 	const json_t* root;
 	const json_t* field;
@@ -1397,10 +1443,13 @@ static bool handle_api_find_task(sb_Stream* s, const char* method, const char* p
 	int task_id = -1;
 	int ret;
 
-	assert(s != NULL);
-	assert(method != NULL);
-	assert(path != NULL);
-	assert(in_data != NULL);
+	if (!s || !method || !path) {
+		return false;
+	}
+	if (!in_data) {
+		kick_error(s, 400, "Bad request", "No data specified.");
+		return false;
+	}
 
 	pool = (json_t*)malloc(sizeof(*pool) * pool_size);
 	if (!pool) {

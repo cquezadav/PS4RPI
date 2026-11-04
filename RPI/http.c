@@ -6,6 +6,9 @@
 #include "net.h"
 #include "ssl.h"
 
+/* A server that does not answer must not hold a thread forever */
+#define HTTP_TIMEOUT_USEC (30u * 1000u * 1000u)
+
 #define HTTP_HEAP_SIZE (1024 * 1024)
 #define SSL_HEAP_SIZE (128 * 1024)
 
@@ -421,6 +424,7 @@ static int do_request(const char* url, int method, const void* data, size_t data
 	uint64_t content_length;
 	size_t i;
 	int ret;
+	int cleanup_ret;
 
 	if (!url) {
 		ret = SCE_HTTP_ERROR_INVALID_VALUE;
@@ -436,6 +440,11 @@ static int do_request(const char* url, int method, const void* data, size_t data
 		goto err;
 	}
 	tpl_id = ret;
+
+	sceHttpSetResolveTimeOut(tpl_id, HTTP_TIMEOUT_USEC);
+	sceHttpSetConnectTimeOut(tpl_id, HTTP_TIMEOUT_USEC);
+	sceHttpSetSendTimeOut(tpl_id, HTTP_TIMEOUT_USEC);
+	sceHttpSetRecvTimeOut(tpl_id, HTTP_TIMEOUT_USEC);
 
 	ret = sceHttpCreateConnectionWithURL(tpl_id, url, 1);
 	if (ret < 0) {
@@ -498,21 +507,21 @@ static int do_request(const char* url, int method, const void* data, size_t data
 	}
 
 err_req_delete:
-	ret = sceHttpDeleteRequest(req_id);
-	if (ret) {
-		EPRINTF("sceHttpDeleteRequest failed: 0x%08X\n", ret);
+	cleanup_ret = sceHttpDeleteRequest(req_id);
+	if (cleanup_ret) {
+		EPRINTF("sceHttpDeleteRequest failed: 0x%08X\n", cleanup_ret);
 	}
 
 err_conn_delete:
-	ret = sceHttpDeleteConnection(conn_id);
-	if (ret) {
-		EPRINTF("sceHttpDeleteConnection failed: 0x%08X\n", ret);
+	cleanup_ret = sceHttpDeleteConnection(conn_id);
+	if (cleanup_ret) {
+		EPRINTF("sceHttpDeleteConnection failed: 0x%08X\n", cleanup_ret);
 	}
 
 err_tpl_delete:
-	ret = sceHttpDeleteTemplate(tpl_id);
-	if (ret) {
-		EPRINTF("sceHttpDeleteTemplate failed: 0x%08X\n", ret);
+	cleanup_ret = sceHttpDeleteTemplate(tpl_id);
+	if (cleanup_ret) {
+		EPRINTF("sceHttpDeleteTemplate failed: 0x%08X\n", cleanup_ret);
 	}
 
 err:

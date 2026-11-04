@@ -42,6 +42,8 @@ struct sb_Server {
   time_t max_lifetime;        /* Maximum time a stream can exist */
   size_t max_request_size;    /* Maximum request size in bytes */
   pthread_mutex_t stream_mtx; /* Mutex to lock stream access */
+  int stream_count;           /* Number of streams (connections with a thread) right now */
+  int max_streams;            /* More connections than this are refused */
 };
 
 struct sb_Stream {

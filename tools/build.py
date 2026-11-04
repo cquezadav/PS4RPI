@@ -15,7 +15,7 @@ OBJ = os.path.join(BUILD, 'obj')
 
 VS_LLVM = r'C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\Llvm\x64\bin'
 
-PKG_VERSION = '01.04'
+PKG_VERSION = '01.05'
 PKG_TITLE = 'RPI'
 PKG_TITLE_ID = 'KPBR01111'
 PKG_CONTENT_ID = 'IV0000-KPBR01111_00-AAAAAAAAAAAAAAAA'

@@ -669,7 +669,7 @@ int sb_send_header(sb_Stream *st, const char *field, const char *val) {
 int sb_send_file(sb_Stream *st, const char *filename) {
   int err;
   char buf[32];
-  struct stat stbuf;
+  uintmax_t stbuf_size;
   int fd = -1;
   if (st->state > STATE_SENDING_HEADER) {
     return SB_EBADSTATE;
@@ -678,12 +678,17 @@ int sb_send_file(sb_Stream *st, const char *filename) {
   fd = open(filename, O_RDONLY);
   if (fd <= 0) return SB_ECANTOPEN;
 
-  /* Get file size and write headers */
-  if (fstat(fd, &stbuf) < 0) {
-    err = SB_EBADRESULT;
-    goto fail;
+  /* Get file size and write headers. Not fstat(): the struct stat of the newer toolchain does not match the console,
+   * st_size was garbage (8 instead of 1660), the PS4 got a wrong Content-Length and failed the download task. */
+  {
+    off_t end = lseek(fd, 0, SEEK_END);
+    if (end < 0 || lseek(fd, 0, SEEK_SET) < 0) {
+      err = SB_EBADRESULT;
+      goto fail;
+    }
+    stbuf_size = (uintmax_t)end;
   }
-  snprintf(buf, sizeof(buf), "%" PRIuMAX, (uintmax_t)stbuf.st_size);
+  snprintf(buf, sizeof(buf), "%" PRIuMAX, stbuf_size);
   err = sb_send_header(st, "Content-Length", buf);
   if (err) goto fail;
   err = sb_stream_finalize_header(st);

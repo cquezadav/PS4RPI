@@ -44,6 +44,10 @@ struct sb_Server {
   pthread_mutex_t stream_mtx; /* Mutex to lock stream access */
   int stream_count;           /* Number of streams (connections with a thread) right now */
   int max_streams;            /* More connections than this are refused */
+  unsigned long accepted_total;  /* connections accepted since the start */
+  unsigned long refused_total;   /* refused because too many were open */
+  unsigned long thread_failures; /* pthread_create failed */
+  int peak_streams;              /* most connections open at the same time */
 };
 
 struct sb_Stream {

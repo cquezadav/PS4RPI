@@ -163,12 +163,31 @@ err:
 }
 
 bool server_listen(void) {
+	time_t started = time(NULL);
+	time_t last_stats = started;
+	unsigned long last_accepted = 0;
+	time_t now;
+
 	if (!s_server_started) {
 		goto err;
 	}
 
 	for (;;) {
 		sb_poll_server(s_server);
+
+		/* Once a minute, when something happened: how many connections RPI served and has open. Every connection
+		 * has a thread, this shows whether they are given back (open now stays low) or leak (the console runs out). */
+		now = time(NULL);
+		if (now - last_stats >= 60) {
+			if (s_server->accepted_total != last_accepted || s_server->refused_total || s_server->thread_failures) {
+				printf("[RPI] stats: up %ld s, %lu connections served, %d open now (peak %d), %lu refused, %lu thread failures\n",
+					(long)(now - started), s_server->accepted_total, s_server->stream_count, s_server->peak_streams,
+					s_server->refused_total, s_server->thread_failures);
+				last_accepted = s_server->accepted_total;
+			}
+			last_stats = now;
+		}
+
 		/* the listening socket does not block, without a pause RPI keeps one CPU core busy */
 		sceKernelUsleep(5 * 1000);
 	}

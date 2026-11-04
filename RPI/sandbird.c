@@ -444,6 +444,7 @@ static void sb_stream_link(sb_Stream *st) {
     srv->streams = st;
   }
   srv->stream_count++;
+  if (srv->stream_count > srv->peak_streams) srv->peak_streams = srv->stream_count;
   pthread_mutex_unlock(&srv->stream_mtx);
 }
 
@@ -1050,13 +1051,16 @@ int sb_poll_server(sb_Server *srv) {
 
   /* Accept connections */
   while ( (sockfd = accept(srv->sockfd, NULL, NULL)) != INVALID_SOCKET ) {
+    srv->accepted_total++;
+
     /* Every connection gets a thread. Too many at the same time means something is wrong
      * (a client that does not answer, a flood): refuse the new one instead of running out of threads */
     pthread_mutex_lock(&srv->stream_mtx);
     count = srv->stream_count;
     pthread_mutex_unlock(&srv->stream_mtx);
     if (srv->max_streams > 0 && count >= srv->max_streams) {
-      KernelPrintOut("[RPI] too many open connections (%d), one was refused\n", count);
+      srv->refused_total++;
+      KernelPrintOut("[RPI] too many open connections (%d), one was refused (%lu refused so far)\n", count, srv->refused_total);
       shutdown(sockfd, SHUT_RDWR);
       close(sockfd);
       sockfd = INVALID_SOCKET;
@@ -1085,7 +1089,12 @@ int sb_poll_server(sb_Server *srv) {
       err = pthread_create(&thr, NULL, &conn_thread, st);
       if (!err) pthread_detach(thr);
     }
-    if (err) goto fail;
+    if (err) {
+      srv->thread_failures++;
+      KernelPrintOut("[RPI] pthread_create failed (error %d): %lu connections served, %d open, %lu thread failures\n",
+        err, srv->accepted_total, srv->stream_count, srv->thread_failures);
+      goto fail;
+    }
 
     st = NULL;
     sockfd = INVALID_SOCKET;

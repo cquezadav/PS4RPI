@@ -67,6 +67,9 @@ original, the port only copied it.
 - `sb_close_server` destroyed the next stream instead of the current one (and NULL at the end).
 - **A log line per request**, `[RPI] POST /api/get_task_progress ok in 3 ms, 2 connections open`, it appears in the
   klog when TTY redirect is on in GoldHEN.
+- **A stats line once a minute** (when something happened), `[RPI] stats: up 3600 s, 412 connections served,
+  1 open now (peak 3), 0 refused, 0 thread failures`. Every connection has a thread: "open now" must stay low, if it
+  climbs the threads are not given back. A failed `pthread_create` and a refused connection are logged at once.
 
 ### Status
 
